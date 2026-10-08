@@ -1,0 +1,158 @@
+version: 2.1
+
+jobs:
+  lint:
+    docker:
+      - image: cimg/python:3.12
+
+    steps:
+      - checkout
+
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install ruff
+
+      - run:
+          name: Run lint
+          command: ruff check .
+
+
+  unit_tests:
+    docker:
+      - image: cimg/python:3.12
+
+    steps:
+      - checkout
+
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install pytest pytest-cov
+
+      - run:
+          name: Run unit tests
+          command: |
+            python -m pytest tests/test_allocate.py \
+              --cov=app.allocate \
+              --cov-report=term-missing \
+              --cov-fail-under=70
+
+
+  integration_tests:
+    docker:
+      - image: cimg/python:3.12
+
+      - image: postgres:16-alpine
+        environment:
+          POSTGRES_USER: hostel
+          POSTGRES_PASSWORD: hostelpass
+          POSTGRES_DB: hostel
+
+      - image: redis:7-alpine
+
+    steps:
+      - checkout
+
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install pytest
+
+      - run:
+          name: Wait for services
+          command: |
+            python - <<'PY'
+            import socket
+            import time
+
+            for host, port in [("localhost", 5432), ("localhost", 6379)]:
+                for _ in range(30):
+                    try:
+                        socket.create_connection((host, port), timeout=1)
+                        break
+                    except OSError:
+                        time.sleep(1)
+                else:
+                    raise RuntimeError(f"{host}:{port} did not start")
+            PY
+
+      - run:
+          name: Run database migrations
+          command: |
+            python - <<'PY'
+            import os
+            import pathlib
+            import psycopg
+
+            conn = psycopg.connect(
+                os.environ.get(
+                    "DATABASE_URL",
+                    "postgresql://hostel:hostelpass@localhost:5432/hostel"
+                )
+            )
+
+            with conn.cursor() as cur:
+                for path in sorted(pathlib.Path("migrations").glob("*.sql")):
+                    print(f"Running {path}")
+                    cur.execute(path.read_text())
+
+            conn.commit()
+            conn.close()
+            PY
+
+      - run:
+          name: Run integration tests
+          command: python -m pytest tests/test_integration.py
+
+
+  secret_scan:
+    machine: true
+
+    steps:
+      - checkout
+
+      - run:
+          name: Secret scan
+          command: |
+            docker run --rm \
+              -v "$PWD:/repo" \
+              zricethezav/gitleaks:latest \
+              detect --source=/repo --no-banner
+
+
+  build_image:
+    machine: true
+
+    steps:
+      - checkout
+
+      - run:
+          name: Build Docker image
+          command: |
+            docker build -t hostel-allocation:1.0 .
+
+
+workflows:
+  build_and_test:
+    jobs:
+      - lint
+
+      - unit_tests:
+          requires:
+            - lint
+
+      - integration_tests:
+          requires:
+            - unit_tests
+
+      - secret_scan:
+          requires:
+            - integration_tests
+
+      - build_image:
+          requires:
+            - secret_scan
