@@ -9,7 +9,7 @@ jobs:
       - checkout
 
       - run:
-          name: Install dependencies
+          name: Install dependencie
           command: |
             pip install -r requirements.txt
             pip install ruff
@@ -65,7 +65,7 @@ jobs:
       - run:
           name: Wait for services
           command: |
-            python - <<'PY'
+            python - \<<'PY'
             import socket
             import time
 
@@ -83,7 +83,7 @@ jobs:
       - run:
           name: Run database migrations
           command: |
-            python - <<'PY'
+            python - \<<'PY'
             import os
             import pathlib
             import psycopg
