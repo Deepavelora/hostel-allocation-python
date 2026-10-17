@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostel-allocation
+spec:
+  containers:
+    - name: hostel-allocation
+      image: deepaachar/hostel-allocation:1.0
+      ports:
+        - containerPort: 8080
